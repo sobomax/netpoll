@@ -19,6 +19,7 @@ package netpoll
 
 import (
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -92,8 +93,11 @@ func (p *defaultPoll) Wait() error {
 
 			var totalRead int
 			evt := events[i]
-			triggerRead = evt.Filter == syscall.EVFILT_READ && evt.Flags&syscall.EV_ENABLE != 0
-			triggerWrite = evt.Filter == syscall.EVFILT_WRITE && evt.Flags&syscall.EV_ENABLE != 0
+			triggerRead = evt.Filter == syscall.EVFILT_READ
+			triggerWrite = evt.Filter == syscall.EVFILT_WRITE
+			if (runtime.GOOS != "freebsd") && (evt.Flags&syscall.EV_ENABLE == 0) {
+				triggerRead, triggerWrite = false, false
+			}
 			triggerHup = evt.Flags&syscall.EV_EOF != 0
 
 			if triggerRead {
