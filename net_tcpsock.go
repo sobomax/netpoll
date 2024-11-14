@@ -12,6 +12,7 @@ package netpoll
 
 import (
 	"context"
+	"runtime"
 	"net"
 	"os"
 	"syscall"
@@ -177,35 +178,37 @@ func DialTCP(ctx context.Context, network string, laddr, raddr *TCPAddr) (*TCPCo
 func (sd *sysDialer) dialTCP(ctx context.Context, laddr, raddr *TCPAddr) (*TCPConnection, error) {
 	conn, err := internetSocket(ctx, sd.network, laddr, raddr, syscall.SOCK_STREAM, 0, "dial")
 
-	// TCP has a rarely used mechanism called a 'simultaneous connection' in
-	// which Dial("tcp", addr1, addr2) run on the machine at addr1 can
-	// connect to a simultaneous Dial("tcp", addr2, addr1) run on the machine
-	// at addr2, without either machine executing Listen. If laddr == nil,
-	// it means we want the kernel to pick an appropriate originating local
-	// address. Some Linux kernels cycle blindly through a fixed range of
-	// local ports, regardless of destination port. If a kernel happens to
-	// pick local port 50001 as the source for a Dial("tcp", "", "localhost:50001"),
-	// then the Dial will succeed, having simultaneously connected to itself.
-	// This can only happen when we are letting the kernel pick a port (laddr == nil)
-	// and when there is no listener for the destination address.
-	// It's hard to argue this is anything other than a kernel bug. If we
-	// see this happen, rather than expose the buggy effect to users, we
-	// close the conn and try again. If it happens twice more, we relent and
-	// use the result. See also:
-	// 	https://golang.org/issue/2690
-	// 	https://stackoverflow.com/questions/4949858/
-	//
-	// The opposite can also happen: if we ask the kernel to pick an appropriate
-	// originating local address, sometimes it picks one that is already in use.
-	// So if the error is EADDRNOTAVAIL, we have to try again too, just for
-	// a different reason.
-	//
-	// The kernel socket code is no doubt enjoying watching us squirm.
-	for i := 0; i < 2 && (laddr == nil || laddr.Port == 0) && (selfConnect(conn, err) || spuriousENOTAVAIL(err)); i++ {
-		if err == nil {
-			conn.Close()
+	if runtime.GOOS == "linux" {
+		// TCP has a rarely used mechanism called a 'simultaneous connection' in
+		// which Dial("tcp", addr1, addr2) run on the machine at addr1 can
+		// connect to a simultaneous Dial("tcp", addr2, addr1) run on the machine
+		// at addr2, without either machine executing Listen. If laddr == nil,
+		// it means we want the kernel to pick an appropriate originating local
+		// address. Some Linux kernels cycle blindly through a fixed range of
+		// local ports, regardless of destination port. If a kernel happens to
+		// pick local port 50001 as the source for a Dial("tcp", "", "localhost:50001"),
+		// then the Dial will succeed, having simultaneously connected to itself.
+		// This can only happen when we are letting the kernel pick a port (laddr == nil)
+		// and when there is no listener for the destination address.
+		// It's hard to argue this is anything other than a kernel bug. If we
+		// see this happen, rather than expose the buggy effect to users, we
+		// close the conn and try again. If it happens twice more, we relent and
+		// use the result. See also:
+		// 	https://golang.org/issue/2690
+		// 	https://stackoverflow.com/questions/4949858/
+		//
+		// The opposite can also happen: if we ask the kernel to pick an appropriate
+		// originating local address, sometimes it picks one that is already in use.
+		// So if the error is EADDRNOTAVAIL, we have to try again too, just for
+		// a different reason.
+		//
+		// The kernel socket code is no doubt enjoying watching us squirm.
+		for i := 0; i < 2 && (laddr == nil || laddr.Port == 0) && (selfConnect(conn, err) || spuriousENOTAVAIL(err)); i++ {
+			if err == nil {
+				conn.Close()
+			}
+			conn, err = internetSocket(ctx, sd.network, laddr, raddr, syscall.SOCK_STREAM, 0, "dial")
 		}
-		conn, err = internetSocket(ctx, sd.network, laddr, raddr, syscall.SOCK_STREAM, 0, "dial")
 	}
 
 	if err != nil {
