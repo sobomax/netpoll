@@ -119,9 +119,6 @@ func (ln *listener) UDPAccept() (net.Conn, error) {
 
 // Close implements Listener.
 func (ln *listener) Close() error {
-	if ln.fd != 0 {
-		syscall.Close(ln.fd)
-	}
 	if ln.file != nil {
 		ln.file.Close()
 	}
@@ -130,6 +127,9 @@ func (ln *listener) Close() error {
 	}
 	if ln.pconn != nil {
 		ln.pconn.Close()
+	}
+	if ln.fd != 0 {
+		syscall.Close(ln.fd)
 	}
 	return nil
 }
