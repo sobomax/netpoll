@@ -51,7 +51,9 @@ func NewDialer() Dialer {
 
 var defaultDialer = NewDialer()
 
-type dialer struct{}
+type dialer struct {
+	LocalAddr net.Addr
+}
 
 // DialTimeout implements Dialer.
 func (d *dialer) DialTimeout(network, address string, timeout time.Duration) (net.Conn, error) {
@@ -106,14 +108,18 @@ func (d *dialer) dialTCP(ctx context.Context, network, address string) (connecti
 
 	var firstErr error // The error from the first address is most relevant.
 	tcpAddr := &TCPAddr{}
+	var localAddr *TCPAddr
+	if d.LocalAddr != nil {
+		localAddr = d.LocalAddr.(*TCPAddr)
+	}
 	for _, ipaddr := range ipaddrs {
 		tcpAddr.IP = ipaddr.IP
 		tcpAddr.Port = portnum
 		tcpAddr.Zone = ipaddr.Zone
 		if ipaddr.IP != nil && ipaddr.IP.To4() == nil {
-			connection, err = DialTCP(ctx, "tcp6", nil, tcpAddr)
+			connection, err = DialTCP(ctx, "tcp6", localAddr, tcpAddr)
 		} else {
-			connection, err = DialTCP(ctx, "tcp", nil, tcpAddr)
+			connection, err = DialTCP(ctx, "tcp", localAddr, tcpAddr)
 		}
 		if err == nil {
 			return connection, nil
@@ -132,6 +138,10 @@ func (d *dialer) dialTCP(ctx context.Context, network, address string) (connecti
 		firstErr = &net.OpError{Op: "dial", Net: network, Source: nil, Addr: nil, Err: errMissingAddress}
 	}
 	return nil, firstErr
+}
+
+func (d *dialer) SetLocalAddr(localAddr net.Addr) {
+	d.LocalAddr = localAddr
 }
 
 // sysDialer contains a Dial's parameters and configuration.

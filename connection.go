@@ -92,4 +92,6 @@ type Dialer interface {
 	DialConnection(network, address string, timeout time.Duration) (connection Connection, err error)
 
 	DialTimeout(network, address string, timeout time.Duration) (conn net.Conn, err error)
+
+	SetLocalAddr(localAddr net.Addr)
 }
