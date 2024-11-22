@@ -21,7 +21,7 @@ import (
 
 // global config
 var (
-	defaultLinkBufferSize   = pagesize
+	defaultLinkBufferSize   = pagesize * 2
 	featureAlwaysNoCopyRead = false
 )
 

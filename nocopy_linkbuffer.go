@@ -24,12 +24,10 @@ import (
 	"github.com/bytedance/gopkg/lang/dirtmake"
 )
 
-// BinaryInplaceThreshold marks the minimum value of the nocopy slice length,
-// which is the threshold to use copy to minimize overhead.
-const BinaryInplaceThreshold = block4k
+
 
 // LinkBufferCap that can be modified marks the minimum value of each node of LinkBuffer.
-var LinkBufferCap = block4k
+var LinkBufferCap = defaultLinkBufferSize
 
 var (
 	_ Reader = &LinkBuffer{}
@@ -406,13 +404,18 @@ func (b *UnsafeLinkBuffer) MallocAck(n int) (err error) {
 	return nil
 }
 
+func (b *UnsafeLinkBuffer) nextLinkBufferNode(l int) *linkBufferNode {
+	n, pn := newLinkBufferNode(l), b.write
+	b.write, pn.next = n, n
+	return n
+}
+
 // Flush will submit all malloc data and must confirm that the allocated bytes have been correctly assigned.
 func (b *UnsafeLinkBuffer) Flush() (err error) {
 	b.mallocSize = 0
 	// FIXME: The tail node must not be larger than 8KB to prevent Out Of Memory.
-	if cap(b.write.buf) > pagesize {
-		b.write.next = newLinkBufferNode(0)
-		b.write = b.write.next
+	if cap(b.write.buf) > defaultLinkBufferSize {
+		b.nextLinkBufferNode(0)
 	}
 	var n int
 	for node := b.flush; node != b.write.next; node = node.next {
@@ -495,15 +498,6 @@ func (b *UnsafeLinkBuffer) WriteBinary(p []byte) (n int, err error) {
 	}
 	b.mallocSize += n
 
-	// TODO: Verify that all nocopy is possible under mcache.
-	if n > BinaryInplaceThreshold {
-		// expand buffer directly with nocopy
-		b.write.next = newLinkBufferNode(0)
-		b.write = b.write.next
-		b.write.buf, b.write.malloc = p[0:], n
-		return n, nil
-	}
-	// here will copy
 	b.growth(n)
 	buf := b.write.Malloc(n)
 	return copy(buf, p), nil
@@ -643,8 +637,7 @@ func (b *UnsafeLinkBuffer) book(bookSize, maxSize int) (p []byte) {
 	// grow linkBuffer
 	if l == 0 {
 		l = maxSize
-		b.write.next = newLinkBufferNode(maxSize)
-		b.write = b.write.next
+		b.nextLinkBufferNode(maxSize)
 	}
 	if l > bookSize {
 		l = bookSize
@@ -677,13 +670,12 @@ func (b *UnsafeLinkBuffer) calcMaxSize() (sum int) {
 // resetTail will reset tail node or add an empty tail node to
 // guarantee the tail node is not larger than 8KB
 func (b *UnsafeLinkBuffer) resetTail(maxSize int) {
-	if maxSize <= pagesize {
+	if maxSize <= defaultLinkBufferSize {
 		// no need to reset a small buffer tail node
 		return
 	}
 	// set nil tail
-	b.write.next = newLinkBufferNode(0)
-	b.write = b.write.next
+	b.nextLinkBufferNode(0)
 	b.flush = b.write
 }
 
@@ -739,8 +731,7 @@ func (b *UnsafeLinkBuffer) growth(n int) {
 	// the memory of readonly node if not malloc by us so should skip them
 	for b.write.getMode(readonlyMask) || cap(b.write.buf)-b.write.malloc < n {
 		if b.write.next == nil {
-			b.write.next = newLinkBufferNode(n)
-			b.write = b.write.next
+			b.nextLinkBufferNode(n)
 			return
 		}
 		b.write = b.write.next
