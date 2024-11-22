@@ -500,7 +500,7 @@ func (b *UnsafeLinkBuffer) WriteBinary(p []byte) (n int, err error) {
 		// expand buffer directly with nocopy
 		b.write.next = newLinkBufferNode(0)
 		b.write = b.write.next
-		b.write.buf, b.write.malloc = p[:0], n
+		b.write.buf, b.write.malloc = p[0:], n
 		return n, nil
 	}
 	// here will copy
